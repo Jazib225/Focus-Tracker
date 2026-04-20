@@ -126,7 +126,7 @@ export function AdaptiveAlerts({
                   A focused stretch of {formatDuration(streakBreakNotice.brokenStreakSeconds)} just reset.
                 </p>
                 <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-400">
-                  Take a breath, pick the next small step, and start building the streak again.
+                  Take a breath, stretch, and start another streak. You've got this.
                 </p>
               </div>
             </div>

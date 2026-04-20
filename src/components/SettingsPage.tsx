@@ -67,7 +67,7 @@ export function SettingsPage({ model }: SettingsPageProps) {
                 </p>
               </div>
               <div className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-sm text-slate-200">
-                {persisted.settings.streakBreakThreshold} before reset
+                {persisted.settings.streakBreakThreshold} before streak reset
               </div>
             </div>
 

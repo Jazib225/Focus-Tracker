@@ -71,7 +71,7 @@ export function ProgressPage({ model }: ProgressPageProps) {
               <p className="text-[11px] uppercase tracking-[0.3em] text-slate-400">Recent Sessions</p>
               <h3 className="mt-2 text-xl font-semibold text-white">Select a session to view details</h3>
               <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">
-                Details stay collapsed until you open a session, so the page is easier to scan.
+                Details are hidden until you select a session.
               </p>
             </div>
             <div className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-xs text-slate-300">
