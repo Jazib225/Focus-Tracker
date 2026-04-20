@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { AdaptiveAlerts } from './AdaptiveAlerts';
+import { DistractionTagPrompt } from './DistractionTagPrompt';
 import { HeaderNavigation, type DashboardPage } from './HeaderNavigation';
 import { ProgressPage } from './ProgressPage';
 import { SessionPage } from './SessionPage';
+import { SessionReportModal } from './SessionReportModal';
 import { SettingsPage } from './SettingsPage';
 import { StreaksPage } from './StreaksPage';
 import type { useSessionEngine } from '../hooks/useSessionEngine';
+import type { SessionSummary } from '../types/focus';
 
 type DashboardModel = ReturnType<typeof useSessionEngine>;
 
@@ -15,6 +18,11 @@ interface DashboardProps {
 
 export function Dashboard({ model }: DashboardProps) {
   const [page, setPage] = useState<DashboardPage>('session');
+  const [dismissedReportId, setDismissedReportId] = useState<string | null>(model.persisted.lastSummary?.id ?? null);
+  const reportSummary: SessionSummary | null =
+    model.persisted.lastSummary && model.persisted.lastSummary.id !== dismissedReportId
+      ? model.persisted.lastSummary
+      : null;
 
   const renderPage = () => {
     switch (page) {
@@ -50,6 +58,18 @@ export function Dashboard({ model }: DashboardProps) {
         onDismissStreakBreakNotice={model.actions.dismissStreakBreakNotice}
         onOverrideLastDistraction={model.actions.overrideLastDistraction}
         onResetEscalation={model.actions.resetEscalation}
+      />
+
+      <DistractionTagPrompt
+        open={model.pendingDistractionTagPrompt !== null}
+        onTag={model.actions.tagPendingDistraction}
+        onSkip={model.actions.dismissDistractionTagPrompt}
+      />
+
+      <SessionReportModal
+        open={reportSummary !== null}
+        summary={reportSummary}
+        onClose={() => setDismissedReportId(model.persisted.lastSummary?.id ?? null)}
       />
 
       <HeaderNavigation page={page} onChange={setPage} />

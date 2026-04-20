@@ -190,7 +190,11 @@ export function ProgressPage({ model }: ProgressPageProps) {
           ) : detailTab === 'report' ? (
             <SessionSummary summary={selectedSession} />
           ) : detailTab === 'timeline' ? (
-            <FocusTimelineChart data={selectedSession.timeline} />
+            <FocusTimelineChart
+              summary={selectedSession}
+              title="Focus score timeline"
+              subtitle="A closer look at focus score changes, distraction markers, and phase changes."
+            />
           ) : (
             <ActivityFeed events={selectedSession.recentEvents} />
           )}

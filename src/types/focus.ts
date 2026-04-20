@@ -7,6 +7,14 @@ export type PomodoroMode = 'focus' | 'break';
 export type PomodoroPhase = 'focus' | 'short-break' | 'long-break';
 export type TrackingState = 'inactive' | 'calibrating' | 'active' | 'uncertain';
 export type DistractionReason = 'camera' | 'tab-switch' | 'inactivity' | 'pomodoro-break';
+export type DistractionTag =
+  | 'phone'
+  | 'other-tab'
+  | 'noise'
+  | 'people-nearby'
+  | 'fatigue'
+  | 'other'
+  | 'uncategorized';
 
 export interface EnvironmentPresetDefinition {
   id: EnvironmentPresetId;
@@ -68,6 +76,7 @@ export interface TimelinePoint {
   bucket: number;
   label: string;
   focusSeconds: number;
+  monitoredSeconds: number;
   idleSeconds: number;
   focusPercent: number;
   distractions: number;
@@ -75,6 +84,8 @@ export interface TimelinePoint {
   inactivityEvents: number;
   cameraEvents: number;
   streakMinutes: number;
+  focusPhaseSeconds: number;
+  breakPhaseSeconds: number;
 }
 
 export interface ActivityEvent {
@@ -84,6 +95,16 @@ export interface ActivityEvent {
   stage: AlertStage;
   label: string;
   detail: string;
+  tag?: DistractionTag;
+}
+
+export interface DistractionRecord {
+  id: string;
+  timestamp: number;
+  stage: AlertStage;
+  bucketIndex: number;
+  phase: PomodoroPhase;
+  tag: DistractionTag;
 }
 
 export interface SessionState {
@@ -110,6 +131,7 @@ export interface SessionState {
   presetId: EnvironmentPresetId;
   timeline: TimelinePoint[];
   recentEvents: ActivityEvent[];
+  distractionLog: DistractionRecord[];
   xpEarned: number;
   bestFocusRunSeconds: number;
   lastTickAt: number | null;
@@ -187,6 +209,7 @@ export interface SessionSummary {
   pomodoroCyclesCompleted: number;
   timeline: TimelinePoint[];
   recentEvents: ActivityEvent[];
+  distractionLog: DistractionRecord[];
   cards: SummaryCard[];
   headline: string;
   subheadline: string;
@@ -209,6 +232,12 @@ export interface StreakBreakNotice {
   tips: string[];
 }
 
+export interface PendingDistractionTagPrompt {
+  sessionId: string;
+  distractionId: string;
+  detectedAt: number;
+}
+
 export interface PersistedAppState {
   settings: FocusSettings;
   pomodoro: PomodoroState;
@@ -218,6 +247,7 @@ export interface PersistedAppState {
   lastSummary: SessionSummary | null;
   pendingDistractionOverride: PendingDistractionOverride | null;
   streakBreakNotice: StreakBreakNotice | null;
+  pendingDistractionTagPrompt: PendingDistractionTagPrompt | null;
 }
 
 export interface OverlayAlert {

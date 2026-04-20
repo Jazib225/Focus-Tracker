@@ -127,6 +127,7 @@ export function createSessionSummary(session: SessionState): SessionSummary {
     pomodoroCyclesCompleted: session.pomodoroCyclesCompleted,
     timeline: session.timeline,
     recentEvents: session.recentEvents,
+    distractionLog: session.distractionLog,
     cards,
     headline,
     subheadline,

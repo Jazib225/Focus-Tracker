@@ -13,6 +13,16 @@ const iconMap = {
   'tab-switch': Clock,
 };
 
+const tagLabels = {
+  phone: 'Phone',
+  'other-tab': 'Other tab',
+  noise: 'Noise',
+  'people-nearby': 'People nearby',
+  fatigue: 'Fatigue',
+  other: 'Other',
+  uncategorized: 'Uncategorized',
+};
+
 export function ActivityFeed({ events }: ActivityFeedProps) {
   return (
     <div className="glass-panel p-5">
@@ -37,7 +47,14 @@ export function ActivityFeed({ events }: ActivityFeedProps) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="font-semibold text-white">{event.label}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold text-white">{event.label}</p>
+                        {event.tag && (
+                          <span className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[10px] uppercase tracking-[0.22em] text-slate-400">
+                            {tagLabels[event.tag]}
+                          </span>
+                        )}
+                      </div>
                       <span className="text-xs uppercase tracking-[0.25em] text-slate-500">
                         {formatDateTime(event.timestamp)}
                       </span>

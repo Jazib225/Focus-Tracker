@@ -15,11 +15,14 @@ import { createSessionSummary } from '../lib/summary';
 import type {
   ActivityEvent,
   AlertStage,
+  DistractionRecord,
   DistractionReason,
+  DistractionTag,
   EnvironmentPresetId,
   FocusSettings,
   OverlayAlert,
   PendingDistractionOverride,
+  PendingDistractionTagPrompt,
   PersistedAppState,
   PomodoroPhase,
   PomodoroState,
@@ -96,6 +99,7 @@ function createTimelineBucket(bucket: number): TimelinePoint {
     bucket,
     label: formatClock(bucketEnd),
     focusSeconds: 0,
+    monitoredSeconds: 0,
     idleSeconds: 0,
     focusPercent: 0,
     distractions: 0,
@@ -103,6 +107,8 @@ function createTimelineBucket(bucket: number): TimelinePoint {
     inactivityEvents: 0,
     cameraEvents: 0,
     streakMinutes: 0,
+    focusPhaseSeconds: 0,
+    breakPhaseSeconds: 0,
   };
 }
 
@@ -132,6 +138,7 @@ function createEmptySession(settings: FocusSettings): SessionState {
     presetId: settings.presetId,
     timeline: [createTimelineBucket(0)],
     recentEvents: [],
+    distractionLog: [],
     xpEarned: 0,
     bestFocusRunSeconds: 0,
     lastTickAt: null,
@@ -140,6 +147,52 @@ function createEmptySession(settings: FocusSettings): SessionState {
     currentCycle: 1,
     totalCycles,
     trackingState: 'inactive',
+  };
+}
+
+function normalizeTimelinePoint(value: unknown, fallbackBucket = 0): TimelinePoint {
+  const defaults = createTimelineBucket(fallbackBucket);
+  const candidate = typeof value === 'object' && value !== null ? value as Partial<TimelinePoint> : {};
+
+  return {
+    ...defaults,
+    ...candidate,
+    monitoredSeconds: candidate.monitoredSeconds ?? defaults.monitoredSeconds,
+    focusPhaseSeconds: candidate.focusPhaseSeconds ?? defaults.focusPhaseSeconds,
+    breakPhaseSeconds: candidate.breakPhaseSeconds ?? defaults.breakPhaseSeconds,
+  };
+}
+
+function normalizeActivityEvent(value: unknown): ActivityEvent | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const candidate = value as Partial<ActivityEvent>;
+  if (!candidate.id || !candidate.timestamp || !candidate.reason || !candidate.label || !candidate.detail) {
+    return null;
+  }
+
+  return {
+    id: candidate.id,
+    timestamp: candidate.timestamp,
+    reason: candidate.reason,
+    stage: candidate.stage ?? 1,
+    label: candidate.label,
+    detail: candidate.detail,
+    tag: candidate.tag,
+  };
+}
+
+function normalizeDistractionRecord(value: unknown): DistractionRecord | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const candidate = value as Partial<DistractionRecord>;
+  if (!candidate.id || !candidate.timestamp) return null;
+
+  return {
+    id: candidate.id,
+    timestamp: candidate.timestamp,
+    stage: candidate.stage ?? 1,
+    bucketIndex: candidate.bucketIndex ?? 0,
+    phase: candidate.phase ?? 'focus',
+    tag: candidate.tag ?? 'uncategorized',
   };
 }
 
@@ -169,8 +222,19 @@ function normalizeSessionState(value: unknown, settings: FocusSettings): Session
     sessionType,
     goal: candidate.goal ?? settings.goal,
     presetId: candidate.presetId ?? settings.presetId,
-    timeline: Array.isArray(candidate.timeline) && candidate.timeline.length > 0 ? candidate.timeline : defaults.timeline,
-    recentEvents: Array.isArray(candidate.recentEvents) ? candidate.recentEvents : [],
+    timeline: Array.isArray(candidate.timeline) && candidate.timeline.length > 0
+      ? candidate.timeline.map((point, index) => normalizeTimelinePoint(point, index))
+      : defaults.timeline,
+    recentEvents: Array.isArray(candidate.recentEvents)
+      ? candidate.recentEvents
+          .map(normalizeActivityEvent)
+          .filter((event): event is ActivityEvent => event !== null)
+      : [],
+    distractionLog: Array.isArray(candidate.distractionLog)
+      ? candidate.distractionLog
+          .map(normalizeDistractionRecord)
+          .filter((record): record is DistractionRecord => record !== null)
+      : [],
     totalCycles,
     streakBreakThreshold,
     streakStrikes: clamp(candidate.streakStrikes ?? 0, 0, streakBreakThreshold),
@@ -203,6 +267,10 @@ function normalizePersistedState(value: unknown): PersistedAppState {
       typeof candidate.streakBreakNotice === 'object' && candidate.streakBreakNotice !== null
         ? candidate.streakBreakNotice as StreakBreakNotice
         : null,
+    pendingDistractionTagPrompt:
+      typeof candidate.pendingDistractionTagPrompt === 'object' && candidate.pendingDistractionTagPrompt !== null
+        ? candidate.pendingDistractionTagPrompt as PendingDistractionTagPrompt
+        : null,
   };
 }
 
@@ -217,6 +285,7 @@ function createInitialState(): PersistedAppState {
     lastSummary: null,
     pendingDistractionOverride: null,
     streakBreakNotice: null,
+    pendingDistractionTagPrompt: null,
   };
 }
 
@@ -276,7 +345,12 @@ function eventCopy(reason: DistractionReason) {
   }
 }
 
-function createActivityEvent(reason: DistractionReason, timestamp: number, stage: AlertStage): ActivityEvent {
+function createActivityEvent(
+  reason: DistractionReason,
+  timestamp: number,
+  stage: AlertStage,
+  tag?: DistractionTag
+): ActivityEvent {
   const copy = eventCopy(reason);
   return {
     id: `${reason}-${timestamp}`,
@@ -285,11 +359,29 @@ function createActivityEvent(reason: DistractionReason, timestamp: number, stage
     stage,
     label: copy.label,
     detail: copy.detail,
+    tag,
   };
 }
 
 function appendActivityEvent(session: SessionState, event: ActivityEvent) {
   return [event, ...session.recentEvents].slice(0, 8);
+}
+
+function createDistractionRecord(
+  eventId: string,
+  timestamp: number,
+  stage: AlertStage,
+  bucketIndex: number,
+  phase: PomodoroPhase
+): DistractionRecord {
+  return {
+    id: eventId,
+    timestamp,
+    stage,
+    bucketIndex,
+    phase,
+    tag: 'uncategorized',
+  };
 }
 
 function recordCameraDistraction(session: SessionState, now: number): CameraDistractionOutcome | null {
@@ -300,7 +392,8 @@ function recordCameraDistraction(session: SessionState, now: number): CameraDist
     Math.max(session.durationSeconds, 1)
   );
   const stage = Math.min(session.escalationCount + 1, 3) as AlertStage;
-  const event = createActivityEvent('camera', now, stage);
+  const event = createActivityEvent('camera', now, stage, 'uncategorized');
+  const distractionRecord = createDistractionRecord(event.id, now, stage, bucketIndex, session.currentPhase);
 
   nextTimeline[bucketIndex] = {
     ...nextTimeline[bucketIndex],
@@ -321,6 +414,7 @@ function recordCameraDistraction(session: SessionState, now: number): CameraDist
     streakStrikes: streakBroken ? 0 : nextStrikeCount,
     escalationCount: session.escalationCount + 1,
     recentEvents: appendActivityEvent(session, event),
+    distractionLog: [distractionRecord, ...session.distractionLog],
   };
 
   next.focusScore = calculateFocusScore(next);
@@ -451,11 +545,38 @@ function overrideCameraDistraction(
     ),
     escalationCount: Math.min(session.escalationCount, pendingOverride.previousEscalationCount),
     recentEvents: session.recentEvents.filter(event => event.id !== pendingOverride.eventId),
+    distractionLog: session.distractionLog.filter(record => record.id !== pendingOverride.eventId),
   };
 
   next.focusScore = calculateFocusScore(next);
   next.xpEarned = refreshXp(next);
   return next;
+}
+
+function applyDistractionTag(
+  session: SessionState,
+  distractionId: string,
+  tag: DistractionTag
+) {
+  return {
+    ...session,
+    distractionLog: session.distractionLog.map(record =>
+      record.id === distractionId
+        ? {
+            ...record,
+            tag,
+          }
+        : record
+    ),
+    recentEvents: session.recentEvents.map(event =>
+      event.id === distractionId
+        ? {
+            ...event,
+            tag,
+          }
+        : event
+    ),
+  };
 }
 
 function advanceLiveState(
@@ -520,13 +641,15 @@ function advanceLiveState(
       ...bucket,
       focusSeconds: bucket.focusSeconds + (focusedThisSecond ? 1 : 0),
       idleSeconds: bucket.idleSeconds + (focusedThisSecond ? 0 : 1),
+      monitoredSeconds: bucket.monitoredSeconds + (reliableTracking ? 1 : 0),
       focusPercent: 0,
       streakMinutes: Number((currentStreakSeconds / 60).toFixed(1)),
+      focusPhaseSeconds: bucket.focusPhaseSeconds + (inFocusPhase ? 1 : 0),
+      breakPhaseSeconds: bucket.breakPhaseSeconds + (inFocusPhase ? 0 : 1),
     };
-    const bucketTotal = updatedBucket.focusSeconds + updatedBucket.idleSeconds;
-    updatedBucket.focusPercent = bucketTotal === 0
+    updatedBucket.focusPercent = updatedBucket.monitoredSeconds === 0
       ? 0
-      : Math.round((updatedBucket.focusSeconds / bucketTotal) * 100);
+      : Math.round((updatedBucket.focusSeconds / updatedBucket.monitoredSeconds) * 100);
     nextTimeline[bucketIndex] = updatedBucket;
 
     nextSession = {
@@ -627,6 +750,7 @@ function finalizeSession(previous: PersistedAppState, finishedSession: SessionSt
     },
     pendingDistractionOverride: null,
     streakBreakNotice: null,
+    pendingDistractionTagPrompt: null,
   };
 }
 
@@ -670,6 +794,7 @@ export function useSessionEngine() {
   const cameraDistractionActiveRef = useRef(false);
   const toastTimeoutRef = useRef<number | null>(null);
   const warningTimeoutRef = useRef<number | null>(null);
+  const distractionTagPromptTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     persistedRef.current = persisted;
@@ -686,6 +811,9 @@ export function useSessionEngine() {
     return () => {
       if (toastTimeoutRef.current !== null) window.clearTimeout(toastTimeoutRef.current);
       if (warningTimeoutRef.current !== null) window.clearTimeout(warningTimeoutRef.current);
+      if (distractionTagPromptTimeoutRef.current !== null) {
+        window.clearTimeout(distractionTagPromptTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -726,6 +854,39 @@ export function useSessionEngine() {
     }
   }, []);
 
+  const showDistractionTagPrompt = useCallback((sessionId: string, distractionId: string, detectedAt: number) => {
+    if (distractionTagPromptTimeoutRef.current !== null) {
+      window.clearTimeout(distractionTagPromptTimeoutRef.current);
+    }
+
+    setPersisted(previous => ({
+      ...previous,
+      pendingDistractionTagPrompt: {
+        sessionId,
+        distractionId,
+        detectedAt,
+      },
+    }));
+
+    distractionTagPromptTimeoutRef.current = window.setTimeout(() => {
+      setPersisted(previous => {
+        const pendingPrompt = previous.pendingDistractionTagPrompt;
+        if (
+          !pendingPrompt ||
+          pendingPrompt.sessionId !== sessionId ||
+          pendingPrompt.distractionId !== distractionId
+        ) {
+          return previous;
+        }
+
+        return {
+          ...previous,
+          pendingDistractionTagPrompt: null,
+        };
+      });
+    }, 12000);
+  }, [setPersisted]);
+
   const emitCameraDistraction = useCallback(() => {
     const current = persistedRef.current;
     if (current.liveSession.status !== 'active' || current.liveSession.currentPhase !== 'focus') return;
@@ -755,9 +916,15 @@ export function useSessionEngine() {
         streakBreakNotice: outcome.streakBroken
           ? buildStreakBreakNotice(outcome.brokenStreakSeconds, now)
           : null,
+        pendingDistractionTagPrompt: {
+          sessionId: outcome.pendingOverride.sessionId,
+          distractionId: outcome.pendingOverride.eventId,
+          detectedAt: now,
+        },
       };
     });
-  }, [setPersisted, showOverlay]);
+    showDistractionTagPrompt(previewOutcome.pendingOverride.sessionId, previewOutcome.pendingOverride.eventId, now);
+  }, [setPersisted, showDistractionTagPrompt, showOverlay]);
 
   useEffect(() => {
     const shouldIgnoreCameraAlerts =
@@ -983,6 +1150,10 @@ export function useSessionEngine() {
     setToastAlert(null);
     setWarningAlert(null);
     setModalAlert(null);
+    if (distractionTagPromptTimeoutRef.current !== null) {
+      window.clearTimeout(distractionTagPromptTimeoutRef.current);
+      distractionTagPromptTimeoutRef.current = null;
+    }
     cameraDistractionActiveRef.current = false;
 
     setPersisted(previous => {
@@ -1014,6 +1185,7 @@ export function useSessionEngine() {
         },
         pendingDistractionOverride: null,
         streakBreakNotice: null,
+        pendingDistractionTagPrompt: null,
       };
     });
 
@@ -1029,6 +1201,10 @@ export function useSessionEngine() {
 
   const endSession = useCallback(() => {
     const now = Date.now();
+    if (distractionTagPromptTimeoutRef.current !== null) {
+      window.clearTimeout(distractionTagPromptTimeoutRef.current);
+      distractionTagPromptTimeoutRef.current = null;
+    }
     setPersisted(previous => {
       if (previous.liveSession.status !== 'active') return previous;
 
@@ -1096,6 +1272,17 @@ export function useSessionEngine() {
   const dismissToast = useCallback(() => setToastAlert(null), []);
   const dismissWarning = useCallback(() => setWarningAlert(null), []);
   const dismissModal = useCallback(() => setModalAlert(null), []);
+  const dismissDistractionTagPrompt = useCallback(() => {
+    if (distractionTagPromptTimeoutRef.current !== null) {
+      window.clearTimeout(distractionTagPromptTimeoutRef.current);
+      distractionTagPromptTimeoutRef.current = null;
+    }
+
+    setPersisted(previous => ({
+      ...previous,
+      pendingDistractionTagPrompt: null,
+    }));
+  }, [setPersisted]);
   const dismissStreakBreakNotice = useCallback(() => {
     setPersisted(previous => ({
       ...previous,
@@ -1103,10 +1290,38 @@ export function useSessionEngine() {
     }));
   }, [setPersisted]);
 
+  const tagPendingDistraction = useCallback((tag: DistractionTag) => {
+    if (distractionTagPromptTimeoutRef.current !== null) {
+      window.clearTimeout(distractionTagPromptTimeoutRef.current);
+      distractionTagPromptTimeoutRef.current = null;
+    }
+
+    setPersisted(previous => {
+      const pendingPrompt = previous.pendingDistractionTagPrompt;
+      if (!pendingPrompt) return previous;
+
+      const sameSession =
+        previous.liveSession.status === 'active' &&
+        previous.liveSession.id === pendingPrompt.sessionId;
+
+      return {
+        ...previous,
+        liveSession: sameSession
+          ? applyDistractionTag(previous.liveSession, pendingPrompt.distractionId, tag)
+          : previous.liveSession,
+        pendingDistractionTagPrompt: null,
+      };
+    });
+  }, [setPersisted]);
+
   const overrideLastDistraction = useCallback(() => {
     setToastAlert(null);
     setWarningAlert(null);
     setModalAlert(null);
+    if (distractionTagPromptTimeoutRef.current !== null) {
+      window.clearTimeout(distractionTagPromptTimeoutRef.current);
+      distractionTagPromptTimeoutRef.current = null;
+    }
     gaze.dismissAlert();
     cameraDistractionActiveRef.current = false;
 
@@ -1116,6 +1331,7 @@ export function useSessionEngine() {
         return {
           ...previous,
           streakBreakNotice: null,
+          pendingDistractionTagPrompt: null,
         };
       }
 
@@ -1129,6 +1345,7 @@ export function useSessionEngine() {
           ...previous,
           pendingDistractionOverride: null,
           streakBreakNotice: null,
+          pendingDistractionTagPrompt: null,
         };
       }
 
@@ -1137,6 +1354,10 @@ export function useSessionEngine() {
         liveSession: overrideCameraDistraction(previous.liveSession, pendingOverride),
         pendingDistractionOverride: null,
         streakBreakNotice: null,
+        pendingDistractionTagPrompt:
+          previous.pendingDistractionTagPrompt?.distractionId === pendingOverride.eventId
+            ? null
+            : previous.pendingDistractionTagPrompt,
       };
     });
   }, [gaze, setPersisted]);
@@ -1178,6 +1399,7 @@ export function useSessionEngine() {
     warningAlert,
     modalAlert,
     canOverrideLastDistraction,
+    pendingDistractionTagPrompt: persisted.pendingDistractionTagPrompt,
     actions: {
       startSession,
       endSession,
@@ -1185,7 +1407,9 @@ export function useSessionEngine() {
       dismissToast,
       dismissWarning,
       dismissModal,
+      dismissDistractionTagPrompt,
       dismissStreakBreakNotice,
+      tagPendingDistraction,
       overrideLastDistraction,
       applyEnvironmentPreset,
       updateGoal,

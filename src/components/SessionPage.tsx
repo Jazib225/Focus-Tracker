@@ -269,7 +269,7 @@ export function SessionPage({ model }: SessionPageProps) {
             <p className="text-[11px] uppercase tracking-[0.3em] text-cyan-200/80">Session Setup</p>
             <h2 className="mt-3 text-4xl font-bold tracking-tight text-white">Set up your study session.</h2>
             <p className="mt-3 max-w-xl text-base leading-7 text-slate-300">
-              Move through the steps one at a time, then start when everything looks right.
+              Ready to dive in?
             </p>
           </div>
 
