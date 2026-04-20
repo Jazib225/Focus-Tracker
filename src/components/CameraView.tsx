@@ -1,9 +1,10 @@
-import React from 'react';
+import type React from 'react';
 import { Camera, CameraOff } from 'lucide-react';
+import type { TrackingState } from '../types/focus';
 
 interface CameraViewProps {
-  videoRef: React.RefObject<HTMLVideoElement | null>;
-  canvasRef: React.RefObject<HTMLCanvasElement | null>;
+  videoRef: React.Ref<HTMLVideoElement>;
+  canvasRef: React.Ref<HTMLCanvasElement>;
   isTracking: boolean;
   isFaceDetected: boolean;
   isLookingAway: boolean;
@@ -11,6 +12,61 @@ interface CameraViewProps {
   calibrationProgress: number;
   gazeX: number;
   gazeY: number;
+  trackingState: TrackingState;
+  compact?: boolean;
+}
+
+function trackingCopy(
+  isTracking: boolean,
+  trackingState: TrackingState,
+  isLookingAway: boolean,
+  isFaceDetected: boolean
+) {
+  if (!isTracking || trackingState === 'inactive') {
+    return {
+      label: 'Camera inactive',
+      detail: 'Turn on the camera to use distraction tracking.',
+      tone: 'bg-slate-500',
+    };
+  }
+
+  if (trackingState === 'calibrating') {
+    return {
+      label: 'Calibrating',
+      detail: 'Look at the screen while tracking starts.',
+      tone: 'bg-cyan-400',
+    };
+  }
+
+  if (trackingState === 'uncertain') {
+    return {
+      label: 'Tracking uncertain',
+      detail: 'Distractions are not counted while the camera signal is unreliable.',
+      tone: 'bg-amber-400',
+    };
+  }
+
+  if (isLookingAway) {
+    return {
+      label: 'Distraction detected',
+      detail: 'Your eyes appear to be away from the screen.',
+      tone: 'bg-rose-400',
+    };
+  }
+
+  if (isFaceDetected) {
+    return {
+      label: 'Focused',
+      detail: 'Tracking is active and working normally.',
+      tone: 'bg-emerald-400',
+    };
+  }
+
+  return {
+    label: 'Looking for face',
+    detail: 'Move into view so tracking can begin.',
+    tone: 'bg-slate-400',
+  };
 }
 
 export const CameraView: React.FC<CameraViewProps> = ({
@@ -23,104 +79,94 @@ export const CameraView: React.FC<CameraViewProps> = ({
   calibrationProgress,
   gazeX,
   gazeY,
+  trackingState,
+  compact = false,
 }) => {
   const dotX = 50 + gazeX * 120;
   const dotY = 50 + gazeY * 120;
   const clampedX = Math.max(5, Math.min(95, dotX));
   const clampedY = Math.max(5, Math.min(95, dotY));
-
-  const borderColor = !isTracking
-    ? 'border-slate-700'
-    : isLookingAway
-    ? 'border-orange-500'
-    : 'border-emerald-500/60';
+  const status = trackingCopy(isTracking, trackingState, isLookingAway, isFaceDetected);
 
   return (
-    <div className={`relative rounded-2xl overflow-hidden border-2 bg-slate-900 shadow-2xl transition-colors duration-300 ${borderColor}`}>
-      {/* Video feed — tall enough to clearly see both eyes */}
+    <div className={`relative overflow-hidden rounded-[32px] border border-white/10 bg-slate-950/85 ${compact ? 'max-w-sm' : ''}`}>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.15),transparent_35%),radial-gradient(circle_at_80%_20%,rgba(139,92,246,0.15),transparent_30%)]" />
+
       <video
         ref={videoRef}
-        className="w-full h-80 object-cover block"
+        className={`${compact ? 'h-52' : 'h-72'} relative z-10 w-full object-cover opacity-95`}
         style={{ transform: 'scaleX(-1)' }}
         muted
         playsInline
       />
 
-      {/* Canvas overlay — mirrored to match the video */}
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 w-full h-full pointer-events-none"
+        className="pointer-events-none absolute inset-0 z-20 h-full w-full"
         style={{ transform: 'scaleX(-1)' }}
       />
 
-      {/* Offline overlay */}
       {!isTracking && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90">
-          <CameraOff className="w-10 h-10 text-slate-500 mb-2" />
-          <p className="text-slate-400 text-sm">Camera offline</p>
-        </div>
-      )}
-
-      {/* Calibration overlay — covers the feed while collecting baseline */}
-      {isTracking && isCalibrating && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/75 backdrop-blur-[2px] z-10">
-          <p className="text-white text-sm font-semibold mb-1">Calibrating…</p>
-          <p className="text-slate-400 text-xs mb-4">Hold still and look at the screen</p>
-          <div className="w-48 h-2 rounded-full bg-slate-700 overflow-hidden">
-            <div
-              className="h-full rounded-full bg-indigo-500 transition-all duration-100"
-              style={{ width: `${Math.round(calibrationProgress * 100)}%` }}
-            />
+        <div className="absolute inset-0 z-30 grid place-items-center bg-slate-950/90">
+          <div className="px-4 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-300">
+              <CameraOff className="h-6 w-6" />
+            </div>
+            <p className="mt-4 text-base font-semibold text-white">Camera inactive</p>
+            <p className="mt-2 text-sm text-slate-400">The timer can keep running, but distractions will not be tracked until the camera is on.</p>
           </div>
-          <p className="text-indigo-400 text-xs font-mono mt-2">
-            {Math.round(calibrationProgress * 100)}%
-          </p>
         </div>
       )}
 
-      {/* Status badge */}
-      {isTracking && !isCalibrating && (
-        <div className={`absolute top-2 left-2 flex items-center gap-1.5 rounded-full px-2.5 py-1 border text-xs font-medium transition-colors duration-200 ${
-          !isFaceDetected
-            ? 'bg-slate-900/80 border-slate-700 text-slate-300'
-            : isLookingAway
-            ? 'bg-orange-950/80 border-orange-500/50 text-orange-300'
-            : 'bg-emerald-950/80 border-emerald-500/40 text-emerald-300'
-        }`}>
-          <span className={`w-2 h-2 rounded-full ${
-            !isFaceDetected ? 'bg-red-400 animate-pulse'
-            : isLookingAway ? 'bg-orange-400 animate-pulse'
-            : 'bg-emerald-400 animate-pulse'
-          }`} />
-          {!isFaceDetected ? 'No face' : isLookingAway ? 'Eyes away' : 'Focused'}
+      {isTracking && isCalibrating && (
+        <div className="absolute inset-0 z-30 grid place-items-center bg-slate-950/70 backdrop-blur-sm">
+          <div className="w-full max-w-xs rounded-[28px] border border-white/10 bg-black/35 px-6 py-5 text-center">
+            <p className="text-[11px] uppercase tracking-[0.3em] text-cyan-200">Calibrating</p>
+            <p className="mt-3 text-lg font-semibold text-white">Look at the screen for a moment</p>
+            <div className="mt-4 h-2 rounded-full bg-white/10">
+              <div
+                className="h-2 rounded-full bg-gradient-to-r from-cyan-400 to-violet-400"
+                style={{ width: `${Math.round(calibrationProgress * 100)}%` }}
+              />
+            </div>
+            <p className="mt-3 text-sm text-slate-300">{Math.round(calibrationProgress * 100)}%</p>
+          </div>
         </div>
       )}
 
-      {/* Camera icon */}
-      <div className="absolute top-2 right-2 bg-slate-900/80 rounded-full p-1.5 border border-slate-700">
-        <Camera className="w-3.5 h-3.5 text-slate-400" />
+      <div className="absolute left-4 top-4 z-30 flex items-center gap-2 rounded-full border border-white/10 bg-slate-950/85 px-3 py-1.5 text-xs font-semibold text-white">
+        <span className={`h-2 w-2 rounded-full ${status.tone}`} />
+        {status.label}
       </div>
 
-      {/* Gaze indicator */}
-      {isTracking && isFaceDetected && (
-        <div className="absolute bottom-2 right-2">
-          <div className="relative w-14 h-14 rounded-lg border border-slate-600 bg-slate-900/90">
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-full h-px bg-slate-700 opacity-60" />
+      <div className="absolute right-4 top-4 z-30 rounded-full border border-white/10 bg-slate-950/85 p-2 text-slate-200">
+        <Camera className="h-4 w-4" />
+      </div>
+
+      {isTracking && isFaceDetected && trackingState === 'active' && (
+        <div className="absolute bottom-4 right-4 z-30">
+          <div className="rounded-[24px] border border-white/10 bg-slate-950/85 px-3 py-3">
+            <div className="relative h-16 w-16 rounded-2xl border border-white/10 bg-black/25">
+              <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-white/10" />
+              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white/10" />
+              <div
+                className={`absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full ${
+                  isLookingAway
+                    ? 'bg-amber-400 shadow-[0_0_18px_rgba(251,191,36,0.75)]'
+                    : 'bg-cyan-300 shadow-[0_0_18px_rgba(34,211,238,0.75)]'
+                }`}
+                style={{ left: `${clampedX}%`, top: `${clampedY}%` }}
+              />
             </div>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="h-full w-px bg-slate-700 opacity-60" />
-            </div>
-            <div
-              className={`absolute w-2.5 h-2.5 rounded-full shadow-lg transition-all duration-75 ${
-                isLookingAway ? 'bg-orange-400 shadow-orange-400/50' : 'bg-cyan-400 shadow-cyan-400/50'
-              }`}
-              style={{ left: `${clampedX}%`, top: `${clampedY}%`, transform: 'translate(-50%, -50%)' }}
-            />
+            <p className="mt-2 text-center text-[10px] uppercase tracking-[0.25em] text-slate-500">Eye tracking</p>
           </div>
-          <p className="text-center text-slate-500 text-[9px] mt-0.5">Gaze</p>
         </div>
       )}
+
+      <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-slate-950/95 via-slate-950/55 to-transparent px-4 pb-4 pt-10">
+        <p className="text-sm font-medium text-white">{status.label}</p>
+        <p className="mt-1 text-xs leading-5 text-slate-400">{status.detail}</p>
+      </div>
     </div>
   );
 };
